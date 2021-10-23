@@ -47,7 +47,7 @@ if [ ! -d "$OVERLAYDIR" ]; then
 	exit 1
 fi
 
-sudo mkdir "/tmp/anbox" && cd "/tmp/anbox"
+sudo rm -rf "/tmp/anbox" && sudo mkdir "/tmp/anbox" && cd "/tmp/anbox"
 
 if [ -d "/tmp/anbox/squashfs-root" ]; then
   sudo rm -rf squashfs-root
@@ -209,4 +209,4 @@ sudo rm -rf "/tmp/anbox"
 
 sleep 20
 
-anbox launch --package=org.anbox.appmgr --component=org.anbox.appmgr.AppViewActivity
+anbox launch --package=org.anbox.appmgr --component=org.anbox.appmgr.AppViewActivity && echo "."
