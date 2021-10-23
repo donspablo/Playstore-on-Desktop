@@ -47,13 +47,9 @@ if [ ! -d "$OVERLAYDIR" ]; then
 	exit 1
 fi
 
-if [ ! -d "$ANBOX/work" ]; then
-    mkdir "$ANBOX/work"
-fi
+sudo mkdir "/tmp/anbox" && cd "/tmp/anbox"
 
-cd "$ANBOX/work"
-
-if [ -d "$ANBOX/work/squashfs-root" ]; then
+if [ -d "/tmp/anbox/squashfs-root" ]; then
   sudo rm -rf squashfs-root
 fi
 
@@ -66,13 +62,13 @@ sudo unsquashfs android.img
 
 if [ "$1" = "--layout" ]; then
 
-	cd "$ANBOX/work"
+	cd "/tmp/anbox"
 	wget -q --show-progress -O anbox-keyboard.kcm -c https://phoenixnap.dl.sourceforge.net/project/androidx86rc2te/Generic_$2.kcm
-	sudo cp anbox-keyboard.kcm "$ANBOX/work/squashfs-root/system/usr/keychars/anbox-keyboard.kcm"
+	sudo cp anbox-keyboard.kcm "/tmp/anbox/squashfs-root/system/usr/keychars/anbox-keyboard.kcm"
 
 	if [ ! -d "$OVERLAYDIR/system/usr/keychars/" ]; then
 		sudo mkdir -p "$OVERLAYDIR/system/usr/keychars/"
-		sudo cp "$ANBOX/work/squashfs-root/system/usr/keychars/anbox-keyboard.kcm" "$OVERLAYDIR/system/usr/keychars/anbox-keyboard.kcm"
+		sudo cp "/tmp/anbox/squashfs-root/system/usr/keychars/anbox-keyboard.kcm" "$OVERLAYDIR/system/usr/keychars/anbox-keyboard.kcm"
 	fi
 fi
 
@@ -80,7 +76,7 @@ OPENGAPPS_RELEASEDATE="$(curl -s https://api.github.com/repos/opengapps/x86_64/r
 OPENGAPPS_FILE="open_gapps-x86_64-7.1-pico-$OPENGAPPS_RELEASEDATE.zip"
 OPENGAPPS_URL="https://sourceforge.net/projects/opengapps/files/x86_64/$OPENGAPPS_RELEASEDATE/$OPENGAPPS_FILE"
 
-cd "$ANBOX/work"
+cd "/tmp/anbox"
 
 while : ;do
  if [ ! -f ./$OPENGAPPS_FILE ]; then
@@ -99,7 +95,7 @@ do
     tar --lzip -xvf ./$filename
 done
 
-cd "$ANBOX/work"
+cd "/tmp/anbox"
 APPDIR="$OVERLAYDIR/system/priv-app"
 if [ ! -d "$APPDIR" ]; then
 	sudo mkdir -p "$APPDIR"
@@ -113,7 +109,7 @@ sudo cp -r ./$(find opengapps -type d -name "GoogleServicesFramework")			$APPDIR
 cd "$APPDIR"
 sudo chown -R 100000:100000 Phonesky GoogleLoginService GoogleServicesFramework PrebuiltGmsCore
 
-cd "$ANBOX/work"
+cd "/tmp/anbox"
 if [ ! -f ./houdini_y.sfs ]; then
   wget -O houdini_y.sfs -q --show-progress "http://dl.android-x86.org/houdini/7_y/houdini.sfs"
   mkdir -p houdini_y
@@ -178,7 +174,7 @@ C=$(echo $C | sed 's/\"/\\\"/g')
 
 if [ ! -d "$OVERLAYDIR/system/etc/permissions/" ]; then
   sudo mkdir -p "$OVERLAYDIR/system/etc/permissions/"
-  sudo cp "$ANBOX/work/squashfs-root/system/etc/permissions/anbox.xml" "$OVERLAYDIR/system/etc/permissions/anbox.xml"
+  sudo cp "/tmp/anbox/squashfs-root/system/etc/permissions/anbox.xml" "$OVERLAYDIR/system/etc/permissions/anbox.xml"
 fi
 
 sudo sed -i "/<\/permissions>/ s/.*/${C}\n&/" "$OVERLAYDIR/system/etc/permissions/anbox.xml"
@@ -187,11 +183,11 @@ sudo sed -i "/<unavailable-feature name=\"android.hardware.wifi\" \/>/d" "$OVERL
 sudo sed -i "/<unavailable-feature name=\"android.hardware.bluetooth\" \/>/d" "$OVERLAYDIR/system/etc/permissions/anbox.xml"
 
 if [ ! -x "$OVERLAYDIR/system/build.prop" ]; then
-  sudo cp "$ANBOX/work/squashfs-root/system/build.prop" "$OVERLAYDIR/system/build.prop"
+  sudo cp "/tmp/anbox/squashfs-root/system/build.prop" "$OVERLAYDIR/system/build.prop"
 fi
 
 if [ ! -x "$OVERLAYDIR/default.prop" ]; then
-  sudo cp "$ANBOX/work/squashfs-root/default.prop" "$OVERLAYDIR/default.prop"
+  sudo cp "/tmp/anbox/squashfs-root/default.prop" "$OVERLAYDIR/default.prop"
 fi
 
 sudo sed -i "/^ro.product.cpu.abilist=x86_64,x86/ s/$/,armeabi-v7a,armeabi,arm64-v8a/" "$OVERLAYDIR/system/build.prop"
@@ -208,6 +204,8 @@ if $WITH_SNAP;then
 else
 	sudo systemctl restart anbox-container-manager.service
 fi
+
+sudo rm -rf "/tmp/anbox"
 
 sleep 20
 
