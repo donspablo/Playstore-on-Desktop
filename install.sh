@@ -2,41 +2,95 @@
 
 sudo apt update && sudo apt install snapd wget curl lzip tar unzip squashfs-tools -y && sleep 10
 sudo snap install --devmode --edge anbox && sleep 5
-
 set -e
 
-ANBOX=$(which anbox)
+WORKDIR="$(pwd)/anbox-work"
 
-SNAP_TOP=""
-if ( [ -d '/var/snap' ] || [ -d '/snap' ] ) && \
-	( [ ${ANBOX} = "/snap/bin/anbox" ] || [ ${ANBOX} == /var/lib/snapd/snap/bin/anbox ] );then
-	if [ -d '/snap' ];then
-		SNAP_TOP=/snap
-	else
-		SNAP_TOP=/var/lib/snapd/snap
-	fi
-	COMBINEDDIR="/var/snap/anbox/common/combined-rootfs"
-	OVERLAYDIR="/var/snap/anbox/common/rootfs-overlay"
-	WITH_SNAP=true
+# use sudo if installed
+if [ ! "$(which sudo)" ]; then
+	SUDO=""
 else
-	COMBINEDDIR="/var/lib/anbox/combined-rootfs"
-	OVERLAYDIR="/var/lib/anbox/rootfs-overlay"
-	WITH_SNAP=false
+	SUDO=$(which sudo)
 fi
 
+# clean downloads
+if [ "$1" = "--clean" ]; then
+   $SUDO rm -rf "$WORKDIR"
+   exit 0
+fi
+
+# check if script was started with BASH
+if [ ! "$(ps -p $$ -oargs= | awk '{print $1}' | grep -E 'bash$')" ]; then
+   echo "Please use BASH to start the script!"
+	 exit 1
+fi
+
+# check if lzip is installed
+if [ ! "$(which lzip)" ]; then
+	echo -e "lzip is not installed. Please install lzip.\nExample: sudo apt install lzip"
+	exit 1
+fi
+
+# check if squashfs-tools are installed
+if [ ! "$(which mksquashfs)" ] || [ ! "$(which unsquashfs)" ]; then
+	echo -e "squashfs-tools is not installed. Please install squashfs-tools.\nExample: sudo apt install squashfs-tools"
+	exit 1
+else
+	MKSQUASHFS=$(which mksquashfs)
+	UNSQUASHFS=$(which unsquashfs)
+fi
+
+# check if wget is installed
+if [ ! "$(which wget)" ]; then
+	echo -e "wget is not installed. Please install wget.\nExample: sudo apt install wget"
+	exit 1
+else
+	WGET=$(which wget)
+fi
+
+# check if curl is installed
+if [ ! "$(which curl)" ]; then
+	echo -e "curl is not installed. Please install curl.\nExample: sudo apt install curl"
+	exit 1
+else
+	CURL=$(which curl)
+fi
+
+# check if unzip is installed
+if [ ! "$(which unzip)" ]; then
+	echo -e "unzip is not installed. Please install unzip.\nExample: sudo apt install unzip"
+	exit 1
+else
+	UNZIP=$(which unzip)
+fi
+
+# check if tar is installed
+if [ ! "$(which tar)" ]; then
+	echo -e "tar is not installed. Please install tar.\nExample: sudo apt install tar"
+	exit 1
+else
+	TAR=$(which tar)
+fi
+
+
+
+# get latest releasedate based on tag_name for latest x86_64 build
+OPENGAPPS_RELEASEDATE="$($CURL -s https://api.github.com/repos/opengapps/x86_64/releases/latest | head -n 10 | grep tag_name | grep -o "\"[0-9][0-9]*\"" | grep -o "[0-9]*")" 
+OPENGAPPS_FILE="open_gapps-x86_64-7.1-mini-$OPENGAPPS_RELEASEDATE.zip"
+OPENGAPPS_URL="https://sourceforge.net/projects/opengapps/files/x86_64/$OPENGAPPS_RELEASEDATE/$OPENGAPPS_FILE"
+
+HOUDINI_Y_URL="http://dl.android-x86.org/houdini/7_y/houdini.sfs"
+HOUDINI_Z_URL="http://dl.android-x86.org/houdini/7_z/houdini.sfs"
+
+COMBINEDDIR="/var/snap/anbox/common/combined-rootfs"
+OVERLAYDIR="/var/snap/anbox/common/rootfs-overlay"
+
+
+
 if [ ! -d "$COMBINEDDIR" ]; then
-  	if $WITH_SNAP;then
-		sudo snap set anbox rootfs-overlay.enable=true
-		sudo snap restart anbox.container-manager
-	else
-		sudo cat >/etc/systemd/system/anbox-container-manager.service.d/override.conf<<EOF
-[Service]
-ExecStart=
-ExecStart=/usr/bin/anbox container-manager --daemon --privileged --data-path=/var/lib/anbox --use-rootfs-overlay
-EOF
-		sudo systemctl daemon-reload
-		sudo systemctl restart anbox-container-manager.service
-	fi
+  # enable overlay fs
+  $SUDO snap set anbox rootfs-overlay.enable=true
+  $SUDO snap restart anbox.container-manager
 
   sleep 20
 fi
@@ -47,111 +101,100 @@ if [ ! -d "$OVERLAYDIR" ]; then
 	exit 1
 fi
 
-sudo rm -rf "/tmp/anbox" && sudo mkdir "/tmp/anbox" && cd "/tmp/anbox"
-
-if [ -d "/tmp/anbox/squashfs-root" ]; then
-  sudo rm -rf squashfs-root
+echo $WORKDIR
+if [ ! -d "$WORKDIR" ]; then
+    mkdir "$WORKDIR"
 fi
 
-if $WITH_SNAP;then
-	cp $SNAP_TOP/anbox/current/android.img .
-else
-	cp /var/lib/anbox/android.img .
+cd "$WORKDIR"
+
+if [ -d "$WORKDIR/squashfs-root" ]; then
+  $SUDO rm -rf squashfs-root
 fi
-sudo unsquashfs android.img
+echo "Extracting anbox android image"
+# get image from anbox
+cp /snap/anbox/current/android.img .
+$SUDO $UNSQUASHFS android.img
 
-if [ "$1" = "--layout" ]; then
-
-	cd "/tmp/anbox"
-	wget -q --show-progress -O anbox-keyboard.kcm -c https://phoenixnap.dl.sourceforge.net/project/androidx86rc2te/Generic_$2.kcm
-	sudo cp anbox-keyboard.kcm "/tmp/anbox/squashfs-root/system/usr/keychars/anbox-keyboard.kcm"
-
-	if [ ! -d "$OVERLAYDIR/system/usr/keychars/" ]; then
-		sudo mkdir -p "$OVERLAYDIR/system/usr/keychars/"
-		sudo cp "/tmp/anbox/squashfs-root/system/usr/keychars/anbox-keyboard.kcm" "$OVERLAYDIR/system/usr/keychars/anbox-keyboard.kcm"
-	fi
+# get opengapps and install it
+cd "$WORKDIR"
+if [ ! -f ./$OPENGAPPS_FILE ]; then
+  echo "Loading open gapps from $OPENGAPPS_URL" 
+  $WGET -q --show-progress $OPENGAPPS_URL
+  $UNZIP -d opengapps ./$OPENGAPPS_FILE
 fi
 
-OPENGAPPS_RELEASEDATE="$(curl -s https://api.github.com/repos/opengapps/x86_64/releases/latest | grep tag_name | grep -o "\"[0-9][0-9]*\"" | grep -o "[0-9]*")"
-OPENGAPPS_FILE="open_gapps-x86_64-7.1-pico-$OPENGAPPS_RELEASEDATE.zip"
-OPENGAPPS_URL="https://sourceforge.net/projects/opengapps/files/x86_64/$OPENGAPPS_RELEASEDATE/$OPENGAPPS_FILE"
-
-cd "/tmp/anbox"
-
-while : ;do
- if [ ! -f ./$OPENGAPPS_FILE ]; then
-	 wget -q --show-progress $OPENGAPPS_URL
- else
-	 wget -q --show-progress -c $OPENGAPPS_URL
- fi
- [ $? = 0 ] && break
-done
-
-unzip -d opengapps ./$OPENGAPPS_FILE
-
+echo "extracting open gapps"
 cd ./opengapps/Core/
 for filename in *.tar.lz
 do
-    tar --lzip -xvf ./$filename
+    $TAR --lzip -xvf ./$filename
 done
 
-cd "/tmp/anbox"
-APPDIR="$OVERLAYDIR/system/priv-app"
+cd "$WORKDIR"
+APPDIR="$OVERLAYDIR/system/priv-app" 
 if [ ! -d "$APPDIR" ]; then
-	sudo mkdir -p "$APPDIR"
+	$SUDO mkdir -p "$APPDIR"
 fi
 
-sudo cp -r ./$(find opengapps -type d -name "PrebuiltGmsCore")					$APPDIR
-sudo cp -r ./$(find opengapps -type d -name "GoogleLoginService")				$APPDIR
-sudo cp -r ./$(find opengapps -type d -name "Phonesky")						$APPDIR
-sudo cp -r ./$(find opengapps -type d -name "GoogleServicesFramework")			$APPDIR
+$SUDO cp -r ./$(find opengapps -type d -name "PrebuiltGmsCore")					$APPDIR
+$SUDO cp -r ./$(find opengapps -type d -name "GoogleLoginService")				$APPDIR
+$SUDO cp -r ./$(find opengapps -type d -name "Phonesky")						$APPDIR
+$SUDO cp -r ./$(find opengapps -type d -name "GoogleServicesFramework")			$APPDIR
 
 cd "$APPDIR"
-sudo chown -R 100000:100000 Phonesky GoogleLoginService GoogleServicesFramework PrebuiltGmsCore
+$SUDO chown -R 100000:100000 Phonesky GoogleLoginService GoogleServicesFramework PrebuiltGmsCore
 
-cd "/tmp/anbox"
+echo "adding lib houdini"
+
+# load houdini_y and spread it
+cd "$WORKDIR"
 if [ ! -f ./houdini_y.sfs ]; then
-  wget -O houdini_y.sfs -q --show-progress "http://dl.android-x86.org/houdini/7_y/houdini.sfs"
+  $WGET -O houdini_y.sfs -q --show-progress $HOUDINI_Y_URL
   mkdir -p houdini_y
-  sudo unsquashfs -f -d ./houdini_y ./houdini_y.sfs
+  $SUDO $UNSQUASHFS -f -d ./houdini_y ./houdini_y.sfs
 fi
 
 LIBDIR="$OVERLAYDIR/system/lib"
 if [ ! -d "$LIBDIR" ]; then
-   sudo mkdir -p "$LIBDIR"
+   $SUDO mkdir -p "$LIBDIR"
 fi
 
-sudo mkdir -p "$LIBDIR/arm"
-sudo cp -r ./houdini_y/* "$LIBDIR/arm"
-sudo chown -R 100000:100000 "$LIBDIR/arm"
-sudo mv "$LIBDIR/arm/libhoudini.so" "$LIBDIR/libhoudini.so"
+$SUDO mkdir -p "$LIBDIR/arm"
+$SUDO cp -r ./houdini_y/* "$LIBDIR/arm"
+$SUDO chown -R 100000:100000 "$LIBDIR/arm"
+$SUDO mv "$LIBDIR/arm/libhoudini.so" "$LIBDIR/libhoudini.so"
+
+# load houdini_z and spread it
 
 if [ ! -f ./houdini_z.sfs ]; then
-  wget -O houdini_z.sfs -q --show-progress "http://dl.android-x86.org/houdini/7_z/houdini.sfs"
+  $WGET -O houdini_z.sfs -q --show-progress $HOUDINI_Z_URL
   mkdir -p houdini_z
-  sudo unsquashfs -f -d ./houdini_z ./houdini_z.sfs
+  $SUDO $UNSQUASHFS -f -d ./houdini_z ./houdini_z.sfs
 fi
 
 LIBDIR64="$OVERLAYDIR/system/lib64"
 if [ ! -d "$LIBDIR64" ]; then
-   sudo mkdir -p "$LIBDIR64"
+   $SUDO mkdir -p "$LIBDIR64"
 fi
 
-sudo mkdir -p "$LIBDIR64/arm64"
-sudo cp -r ./houdini_z/* "$LIBDIR64/arm64"
-sudo chown -R 100000:100000 "$LIBDIR64/arm64"
-sudo mv "$LIBDIR64/arm64/libhoudini.so" "$LIBDIR64/libhoudini.so"
+$SUDO mkdir -p "$LIBDIR64/arm64"
+$SUDO cp -r ./houdini_z/* "$LIBDIR64/arm64"
+$SUDO chown -R 100000:100000 "$LIBDIR64/arm64"
+$SUDO mv "$LIBDIR64/arm64/libhoudini.so" "$LIBDIR64/libhoudini.so"
 
 # add houdini parser
 BINFMT_DIR="/proc/sys/fs/binfmt_misc/register"
 set +e
-echo ':arm_exe:M::\x7f\x45\x4c\x46\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x28::/system/lib/arm/houdini:P' | sudo tee -a "$BINFMT_DIR"
-echo ':arm_dyn:M::\x7f\x45\x4c\x46\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03\x00\x28::/system/lib/arm/houdini:P' | sudo tee -a "$BINFMT_DIR"
-echo ':arm64_exe:M::\x7f\x45\x4c\x46\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xb7::/system/lib64/arm64/houdini64:P' | sudo tee -a "$BINFMT_DIR"
-echo ':arm64_dyn:M::\x7f\x45\x4c\x46\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03\x00\xb7::/system/lib64/arm64/houdini64:P' | sudo tee -a "$BINFMT_DIR"
+echo ':arm_exe:M::\x7f\x45\x4c\x46\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x28::/system/lib/arm/houdini:P' | $SUDO tee -a "$BINFMT_DIR"
+echo ':arm_dyn:M::\x7f\x45\x4c\x46\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03\x00\x28::/system/lib/arm/houdini:P' | $SUDO tee -a "$BINFMT_DIR"
+echo ':arm64_exe:M::\x7f\x45\x4c\x46\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xb7::/system/lib64/arm64/houdini64:P' | $SUDO tee -a "$BINFMT_DIR"
+echo ':arm64_dyn:M::\x7f\x45\x4c\x46\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03\x00\xb7::/system/lib64/arm64/houdini64:P' | $SUDO tee -a "$BINFMT_DIR"
 
 set -e
 
+echo "Modify anbox features"
+# add features
 C=$(cat <<-END
   <feature name="android.hardware.touchscreen" />\n
   <feature name="android.hardware.audio.output" />\n
@@ -173,40 +216,35 @@ C=$(echo $C | sed 's/\//\\\//g')
 C=$(echo $C | sed 's/\"/\\\"/g')
 
 if [ ! -d "$OVERLAYDIR/system/etc/permissions/" ]; then
-  sudo mkdir -p "$OVERLAYDIR/system/etc/permissions/"
-  sudo cp "/tmp/anbox/squashfs-root/system/etc/permissions/anbox.xml" "$OVERLAYDIR/system/etc/permissions/anbox.xml"
+  $SUDO mkdir -p "$OVERLAYDIR/system/etc/permissions/"
+  $SUDO cp "$WORKDIR/squashfs-root/system/etc/permissions/anbox.xml" "$OVERLAYDIR/system/etc/permissions/anbox.xml"
 fi
 
-sudo sed -i "/<\/permissions>/ s/.*/${C}\n&/" "$OVERLAYDIR/system/etc/permissions/anbox.xml"
+$SUDO sed -i "/<\/permissions>/ s/.*/${C}\n&/" "$OVERLAYDIR/system/etc/permissions/anbox.xml"
 
-sudo sed -i "/<unavailable-feature name=\"android.hardware.wifi\" \/>/d" "$OVERLAYDIR/system/etc/permissions/anbox.xml"
-sudo sed -i "/<unavailable-feature name=\"android.hardware.bluetooth\" \/>/d" "$OVERLAYDIR/system/etc/permissions/anbox.xml"
+# make wifi and bt available
+$SUDO sed -i "/<unavailable-feature name=\"android.hardware.wifi\" \/>/d" "$OVERLAYDIR/system/etc/permissions/anbox.xml"
+$SUDO sed -i "/<unavailable-feature name=\"android.hardware.bluetooth\" \/>/d" "$OVERLAYDIR/system/etc/permissions/anbox.xml"
 
 if [ ! -x "$OVERLAYDIR/system/build.prop" ]; then
-  sudo cp "/tmp/anbox/squashfs-root/system/build.prop" "$OVERLAYDIR/system/build.prop"
+  $SUDO cp "$WORKDIR/squashfs-root/system/build.prop" "$OVERLAYDIR/system/build.prop"
 fi
 
 if [ ! -x "$OVERLAYDIR/default.prop" ]; then
-  sudo cp "/tmp/anbox/squashfs-root/default.prop" "$OVERLAYDIR/default.prop"
+  $SUDO cp "$WORKDIR/squashfs-root/default.prop" "$OVERLAYDIR/default.prop"
 fi
 
-sudo sed -i "/^ro.product.cpu.abilist=x86_64,x86/ s/$/,armeabi-v7a,armeabi,arm64-v8a/" "$OVERLAYDIR/system/build.prop"
-sudo sed -i "/^ro.product.cpu.abilist32=x86/ s/$/,armeabi-v7a,armeabi/" "$OVERLAYDIR/system/build.prop"
-sudo sed -i "/^ro.product.cpu.abilist64=x86_64/ s/$/,arm64-v8a/" "$OVERLAYDIR/system/build.prop"
+# set processors
+$SUDO sed -i "/^ro.product.cpu.abilist=x86_64,x86/ s/$/,armeabi-v7a,armeabi,arm64-v8a/" "$OVERLAYDIR/system/build.prop"
+$SUDO sed -i "/^ro.product.cpu.abilist32=x86/ s/$/,armeabi-v7a,armeabi/" "$OVERLAYDIR/system/build.prop"
+$SUDO sed -i "/^ro.product.cpu.abilist64=x86_64/ s/$/,arm64-v8a/" "$OVERLAYDIR/system/build.prop"
 
-echo "persist.sys.nativebridge=1" | sudo tee -a "$OVERLAYDIR/system/build.prop"
-sudo sed -i '/ro.zygote=zygote64_32/a\ro.dalvik.vm.native.bridge=libhoudini.so' "$OVERLAYDIR/default.prop"
+echo "persist.sys.nativebridge=1" | $SUDO tee -a "$OVERLAYDIR/system/build.prop"
+$SUDO sed -i '/ro.zygote=zygote64_32/a\ro.dalvik.vm.native.bridge=libhoudini.so' "$OVERLAYDIR/default.prop"
 
-echo "ro.opengles.version=131072" | sudo tee -a "$OVERLAYDIR/system/build.prop"
+# enable opengles
+echo "ro.opengles.version=131072" | $SUDO tee -a "$OVERLAYDIR/system/build.prop"
 
-if $WITH_SNAP;then
-	sudo snap restart anbox.container-manager
-else
-	sudo systemctl restart anbox-container-manager.service
-fi
+echo "Restart anbox"
 
-sudo rm -rf "/tmp/anbox"
-
-sleep 20
-
-anbox launch --package=org.anbox.appmgr --component=org.anbox.appmgr.AppViewActivity && echo "."
+$SUDO snap restart anbox.container-manager
